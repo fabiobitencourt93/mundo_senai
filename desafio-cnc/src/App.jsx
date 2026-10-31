@@ -8,7 +8,7 @@ N10 G17 G21 G40 G80 G90
 N20 (FERRAMENTA DE ACABAMENTO)
 N30 G53 X0
 N40 G53 Z0
-N50 T0101 (DNMG 15 PDJNL)
+N50 T0101 (DCMT SDJCR)
 N60 G54
 N70 G92 S250
 N80 G96 S3000 M4
@@ -29,9 +29,9 @@ N200 M5
 N210 M30`;
 
 // Componente da Placa Universal (3 Castanhas)
-function Placa3Castanhas({ groupRef }) {
+function Placa3Castanhas() {
   return (
-    <group ref={groupRef} position={[0, 0, -25]}>
+    <group position={[0, 0, -25]}>
       <mesh rotation={[Math.PI / 2, 0, 0]}>
         <cylinderGeometry args={[22, 22, 12, 64]} />
         <meshStandardMaterial color="#3a3a3a" metalness={0.7} roughness={0.4} />
@@ -63,11 +63,13 @@ function Placa3Castanhas({ groupRef }) {
   );
 }
 
-// Simulador CNC e Animação
-function CNCMachine({ path, simState, onFinish, onCollision }) {
+// Simulador CNC Principal
+function CNCMachine({ path, simState, onFinish, onCollision, workpieceColor }) {
   const toolGroupRef = useRef();
   const workpieceMeshRef = useRef();
   const rotGroupRef = useRef();
+  const chipRef = useRef();
+  const chipTimer = useRef(0);
   
   const animState = useRef({ index: 0, t: 0 });
   const prevToolPos = useRef({ r: 5, z: 2 });
@@ -82,16 +84,20 @@ function CNCMachine({ path, simState, onFinish, onCollision }) {
   const originalPositions = useMemo(() => new Float32Array(geometry.attributes.position.array), [geometry]);
   const currentRadii = useRef(new Float32Array(originalPositions.length / 3).fill(10.5));
 
+  // Reset e Inicialização da Peça Bruta
   useEffect(() => {
-    if (simState === 'PLAYING' && path.length > 0) {
-      animState.current = { index: 0, t: 0 };
-      const startR = path[0].x / 2;
-      prevToolPos.current = { r: startR, z: path[0].z };
-      
-      if (toolGroupRef.current) {
-        toolGroupRef.current.position.set(startR, 0, path[0].z);
+    if (simState === 'PLAYING' || simState === 'IDLE') {
+      if (simState === 'PLAYING' && path.length > 0) {
+        animState.current = { index: 0, t: 0 };
+        const startR = path[0].x / 2;
+        prevToolPos.current = { r: startR, z: path[0].z };
+        chipTimer.current = 0;
+        
+        if (toolGroupRef.current) {
+          toolGroupRef.current.position.set(startR, 0, path[0].z);
+        }
       }
-      
+
       currentRadii.current.fill(10.5);
       const positions = workpieceMeshRef.current.geometry.attributes.position.array;
       for (let i = 0; i < positions.length; i++) {
@@ -104,7 +110,29 @@ function CNCMachine({ path, simState, onFinish, onCollision }) {
 
   useFrame((state, delta) => {
     if (simState === 'PLAYING') {
-      if (rotGroupRef.current) rotGroupRef.current.rotation.z -= 15 * delta;
+      // A Placa e a Peça giram juntas
+      if (rotGroupRef.current) {
+        rotGroupRef.current.rotation.z -= 30 * delta; 
+      }
+      
+      // Animação dinâmica do cavaco de metal a ser expulso
+      if (chipRef.current) {
+        chipTimer.current += delta * 6;
+        const tCycle = chipTimer.current % 1;
+        
+        // O cavaco nasce na ponta da pastilha e voa para trás e para cima
+        chipRef.current.position.set(
+            8 - tCycle * 6, 
+            1 + tCycle * 6,      
+            tCycle * 4       
+        );
+        
+        chipRef.current.rotation.x += 25 * delta;
+        chipRef.current.rotation.y += 20 * delta;
+        
+        const s = 1 - (tCycle * tCycle); 
+        chipRef.current.scale.set(s, s, s);
+      }
     }
 
     if (simState !== 'PLAYING' || path.length < 2) return;
@@ -203,53 +231,55 @@ function CNCMachine({ path, simState, onFinish, onCollision }) {
 
   return (
     <group>
-        <Placa3Castanhas groupRef={rotGroupRef} />
-        
+        {/* Agrupamento do fuso (spindle) que roda em conjunto */}
         <group ref={rotGroupRef}>
+            <Placa3Castanhas />
             <mesh ref={workpieceMeshRef} geometry={geometry}>
-                <meshStandardMaterial color="#9ba4b5" metalness={0.7} roughness={0.3} />
+                <meshStandardMaterial color={workpieceColor} metalness={0.6} roughness={0.3} />
             </mesh>
         </group>
 
-        {/* Ferramenta Completa: PDJNL Esquerdo com Pastilha DNMG 15 */}
+        {/* Conjunto da Ferramenta de Torneamento */}
         {(simState === 'PLAYING' || simState === 'FINISHED') && (
             <group ref={toolGroupRef} position={[5, 0, 2]}>
                 
-                {/* Corpo do Suporte 20x20x100 */}
-                <mesh position={[55, -10, 10]}>
-                    <boxGeometry args={[100, 20, 20]} />
-                    <meshStandardMaterial color="#1a1a1a" metalness={0.8} roughness={0.3} />
-                </mesh>
-
-                {/* Detalhe da cabeça angulada do suporte PDJNL */}
-                <mesh position={[7, -10, 3]} rotation={[0, -Math.PI / 10, 0]}>
-                    <boxGeometry args={[15, 20, 14]} />
-                    <meshStandardMaterial color="#1a1a1a" metalness={0.8} roughness={0.3} />
-                </mesh>
-
-                {/* Conjunto da Pastilha DNMG e Grampo */}
-                <group position={[0, -2.5, 0]} rotation={[0, Math.PI / 5, 0]}>
-                    
-                    {/* Pastilha DNMG 15 (Losango de 55 graus maior) */}
-                    <mesh position={[15.5, 0, 0]} scale={[15.5, 1, 8.5]}>
-                        <cylinderGeometry args={[1, 1, 4.76, 4]} />
-                        <meshStandardMaterial color="#ffd700" metalness={0.6} roughness={0.2} />
+                {/* Suporte da Ferramenta */}
+                <group rotation={[0, Math.PI / 16, 0]}>
+                    <mesh position={[35, -9, 0]}>
+                        <boxGeometry args={[65, 16, 16]} />
+                        <meshStandardMaterial color="#1f1f1f" metalness={0.8} roughness={0.4} />
                     </mesh>
-
-                    {/* Grampo (Clamp superior) da PDJNL */}
-                    <mesh position={[17.5, 2.5, 0]} rotation={[0, 0, -0.05]}>
-                        <boxGeometry args={[11, 4, 7]} />
-                        <meshStandardMaterial color="#050505" metalness={0.9} roughness={0.4} />
+                    <mesh position={[10, -9, -3]} rotation={[0, Math.PI / 8, 0]}>
+                        <boxGeometry args={[18, 16, 14]} />
+                        <meshStandardMaterial color="#1f1f1f" metalness={0.8} roughness={0.4} />
                     </mesh>
-
-                    {/* Parafuso do Grampo */}
-                    <mesh position={[20, 4.5, 0]}>
-                        <cylinderGeometry args={[1.5, 1.5, 1.5, 16]} />
-                        <meshStandardMaterial color="#111" />
-                    </mesh>
-
                 </group>
-                
+
+                {/* Pastilha Rômbica e Parafuso */}
+                <group position={[0, 0, 0]} rotation={[0, Math.PI / 5.5, 0]}>
+                    <mesh position={[8, -1, 0]} scale={[8, 2, 4.2]}>
+                        <cylinderGeometry args={[1, 1, 1, 4]} />
+                        <meshStandardMaterial color="#ffd700" metalness={0.4} roughness={0.2} />
+                    </mesh>
+                    
+                    <mesh position={[8, 0.1, 0]}>
+                        <cylinderGeometry args={[1.5, 1.5, 0.4, 16]} />
+                        <meshStandardMaterial color="#d0d0d0" metalness={0.9} roughness={0.2} />
+                    </mesh>
+                    
+                    <mesh position={[8, 0.31, 0]}>
+                        <cylinderGeometry args={[0.8, 0.8, 0.1, 6]} />
+                        <meshBasicMaterial color="#111" />
+                    </mesh>
+                    
+                    {/* Elemento 3D do Cavaco */}
+                    {simState === 'PLAYING' && (
+                        <mesh ref={chipRef}>
+                            <torusGeometry args={[0.8, 0.15, 8, 12, Math.PI * 1.5]} />
+                            <meshStandardMaterial color={workpieceColor} metalness={0.9} roughness={0.1} />
+                        </mesh>
+                    )}
+                </group>
             </group>
         )}
     </group>
@@ -261,6 +291,8 @@ export default function App() {
   const [status, setStatus] = useState('AGUARDANDO...');
   const [path, setPath] = useState([]);
   const [simState, setSimState] = useState('IDLE'); 
+  const [workpieceColor, setWorkpieceColor] = useState('#c0c8d0');
+  const [bgColor, setBgColor] = useState('#17171e'); 
 
   const simularUsinagem = () => {
     setStatus('SIMULANDO...');
@@ -290,6 +322,12 @@ export default function App() {
     }, 100);
   };
 
+  const handleRestart = () => {
+    setSimState('IDLE');
+    setPath([]);
+    setStatus('AGUARDANDO...');
+  };
+
   const handleFinish = () => {
     setSimState('FINISHED');
     const hasChamfer = path.some(p => p.x === 12 && p.z === -1);
@@ -308,11 +346,27 @@ export default function App() {
     setStatus('GAME OVER: COLISÃO COM A PLACA / LINHA DE CENTRO!');
   };
 
+  const materials = [
+    { name: 'Aço/Alumínio', hex: '#c0c8d0' },
+    { name: 'Latão/Ouro', hex: '#d4af37' },
+    { name: 'Cobre/Bronze', hex: '#b87333' },
+    { name: 'Nylon Preto', hex: '#111111' },
+    { name: 'Nylon Azul', hex: '#1e90ff' }
+  ];
+
+  const backgrounds = [
+    { name: 'Escuro Padrão', hex: '#17171e' },
+    { name: 'Cinza Industrial', hex: '#5a5a66' },
+    { name: 'Azul Claro', hex: '#8ca1b3' },
+    { name: 'Verde Máquina', hex: '#2c3e35' },
+    { name: 'Branco', hex: '#ffffff' }
+  ];
+
   return (
     <div style={{ display: 'flex', height: '100vh', backgroundColor: '#1e1e1e', color: '#fff', fontFamily: 'monospace' }}>
-      <div style={{ width: '35%', padding: '20px', backgroundColor: '#2d2d2d', borderRight: '4px solid #444', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ width: '35%', padding: '20px', backgroundColor: '#2d2d2d', borderRight: '4px solid #444', display: 'flex', flexDirection: 'column', zIndex: 10 }}>
         <h2 style={{ color: '#e0c020', marginBottom: '10px', fontSize: '1.2rem' }}>DESAFIO CNC - MUNDO SENAI</h2>
-        <p style={{ color: '#aaa', fontSize: '12px', marginBottom: '20px' }}>Complete as coordenadas de perfil (G01) para a Régua Cilíndrica. Ferramenta: DNMG 15 / Suporte PDJNL (Esquerdo) 20x20.</p>
+        <p style={{ color: '#aaa', fontSize: '12px', marginBottom: '20px' }}>Complete as coordenadas de perfil (G01) para a Régua Cilíndrica. Ferramenta: DCMT com fixação por parafuso.</p>
         
         <textarea 
           value={gcode}
@@ -320,29 +374,76 @@ export default function App() {
           style={{ flex: 1, backgroundColor: '#1e1e1e', color: '#569cd6', padding: '15px', border: '1px solid #555', fontSize: '14px', resize: 'none', outline: 'none' }}
         />
         
-        <button 
-          onClick={simularUsinagem}
-          style={{ marginTop: '20px', padding: '15px', backgroundColor: '#007acc', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '16px' }}
-        >
-          INICIAR CICLO (CYCLE START)
-        </button>
+        <div style={{ display: 'flex', gap: '10px', marginTop: '20px' }}>
+          <button 
+            onClick={simularUsinagem}
+            style={{ flex: 1, padding: '15px', backgroundColor: '#007acc', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}
+          >
+            INICIAR CICLO
+          </button>
+          <button 
+            onClick={handleRestart}
+            style={{ padding: '15px 25px', backgroundColor: '#cc3300', color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold', fontSize: '15px' }}
+          >
+            RESTART
+          </button>
+        </div>
+
+        <div style={{ marginTop: '20px', padding: '10px', backgroundColor: '#1e1e1e', border: '1px solid #444' }}>
+          <span style={{ color: '#aaa', fontSize: '12px', display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>MATERIAL DA PEÇA:</span>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+            {materials.map((mat) => (
+              <div 
+                key={mat.hex}
+                onClick={() => setWorkpieceColor(mat.hex)}
+                title={mat.name}
+                style={{ 
+                  width: '35px', height: '35px', backgroundColor: mat.hex, borderRadius: '50%', cursor: 'pointer', 
+                  border: workpieceColor === mat.hex ? '3px solid white' : '3px solid transparent',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.5)'
+                }}
+              />
+            ))}
+          </div>
+        </div>
+
+        <div style={{ marginTop: '10px', padding: '10px', backgroundColor: '#1e1e1e', border: '1px solid #444' }}>
+          <span style={{ color: '#aaa', fontSize: '12px', display: 'block', marginBottom: '10px', fontWeight: 'bold' }}>COR DO FUNDO:</span>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'space-between' }}>
+            {backgrounds.map((bg) => (
+              <div 
+                key={bg.hex}
+                onClick={() => setBgColor(bg.hex)}
+                title={bg.name}
+                style={{ 
+                  width: '35px', height: '35px', backgroundColor: bg.hex, borderRadius: '4px', cursor: 'pointer', 
+                  border: bgColor === bg.hex ? '3px solid #00ccff' : '3px solid #555'
+                }}
+              />
+            ))}
+          </div>
+        </div>
 
         <div style={{ marginTop: '15px', padding: '15px', backgroundColor: simState === 'COLLISION' ? '#a00' : (status.includes('PARABÉNS') ? '#0a0' : '#444'), textAlign: 'center', fontWeight: 'bold' }}>
           {status}
         </div>
       </div>
 
-      <div style={{ width: '65%', position: 'relative' }}>
-        <Canvas camera={{ position: [30, 25, 45], fov: 45 }}>
-          <color attach="background" args={['#111']} />
-          <ambientLight intensity={0.5} />
-          <directionalLight position={[10, 10, 5]} intensity={1.5} />
+      <div style={{ width: '65%', position: 'relative', backgroundColor: bgColor }}>
+        <Canvas camera={{ position: [25, 25, 38], fov: 45 }}>
+          <color attach="background" args={[bgColor]} />
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[10, 15, 10]} intensity={1.5} />
+          <directionalLight position={[-10, 5, 5]} intensity={0.5} />
           
+          <gridHelper args={[100, 25, '#444', '#222']} position={[0, -15, 0]} />
+
           <CNCMachine 
              path={path} 
              simState={simState} 
              onFinish={handleFinish} 
              onCollision={handleCollision} 
+             workpieceColor={workpieceColor}
           />
 
           {simState === 'COLLISION' && (
